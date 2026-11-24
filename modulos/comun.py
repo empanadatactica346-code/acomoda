@@ -2,6 +2,7 @@
 normalización de textos y códigos, y registro del acta de confirmaciones."""
 
 import json
+import os
 import re
 import unicodedata
 from datetime import datetime
@@ -11,10 +12,12 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 CARPETA_CONFIGURACION = RAIZ / "configuracion"
 CARPETA_NORMATIVAS = RAIZ / "normativas"
-CARPETA_PLANTILLAS = RAIZ / "plantillas_generadas"
+# Donde se escribe (el ejecutable la fija junto a Acomoda.exe)
+RAIZ_DATOS = Path(os.environ.get("ACOMODA_DATOS") or RAIZ)
+CARPETA_PLANTILLAS = RAIZ_DATOS / "plantillas_generadas"
 CARPETA_ENTRADA = RAIZ / "datos_entrada"
-CARPETA_PROCESADOS = RAIZ / "datos_procesados"
-CARPETA_RESULTADOS = RAIZ / "resultados"
+CARPETA_PROCESADOS = RAIZ_DATOS / "datos_procesados"
+CARPETA_RESULTADOS = RAIZ_DATOS / "resultados"
 
 for _carpeta in (CARPETA_PLANTILLAS, CARPETA_ENTRADA, CARPETA_PROCESADOS, CARPETA_RESULTADOS):
     _carpeta.mkdir(parents=True, exist_ok=True)

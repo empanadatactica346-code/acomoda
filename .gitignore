@@ -18,3 +18,7 @@ datos_entrada/*.csv
 .streamlit/secrets.toml
 .venv/
 venv/
+
+build/
+dist/
+Acomoda_datos/

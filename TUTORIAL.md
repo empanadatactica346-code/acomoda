@@ -16,10 +16,8 @@ No necesita saber estadística: la app hace los cálculos y le muestra un recuad
 | **Medidas del local** (largo, ancho, alto, puertas, columnas) | Una wincha y 20 minutos | Sí (puede usar el ejemplo para aprender) |
 | Medidas de los productos que más vende | Wincha y balanza | Recomendado |
 
-> 💾 **Su avance se guarda solo.** La dirección de la página termina en `?p=` seguido de un código (por ejemplo
-> `?p=4f3a9c1b22d0`). **Guarde esa dirección en favoritos.** Si recarga la página (F5 o Ctrl+Shift+R), cierra el
-> navegador o cambia de computadora, al abrir esa misma dirección sigue donde se quedó.
-> **No comparta el enlace:** quien lo tenga ve su proyecto.
+> 💾 **Su avance se guarda solo** en esta computadora (nada sale a internet). Si recarga la página o cierra
+> Acomoda, al volver a abrirlo sigue donde se quedó.
 
 En la barra de la izquierda verá los 8 pasos. Cada uno tiene un ícono:
 ✅ listo · ⚠️ listo con advertencias · ⏳ falta hacerlo · 🔒 se abre cuando termine el anterior.
@@ -127,12 +125,11 @@ después, y la lista de productos con su ubicación. Confirme.
 
 ## Preguntas frecuentes
 
-**Recargué la página y aparece vacía.** Abra la dirección que guardó en favoritos (la que termina en `?p=…`).
-Si la abrió sin ese código, se creó un proyecto nuevo; el anterior sigue guardado en su enlace.
+**Recargué la página y aparece vacía.** Cierre y vuelva a abrir Acomoda: se abre el último proyecto.
 
-**¿Cuánto tiempo se guarda mi proyecto?** 60 días desde la última vez que lo abrió.
+**¿Cuánto tiempo se guarda mi proyecto?** Mientras no borre la carpeta `Acomoda_datos` (junto a `Acomoda.exe`).
 
-**¿Puedo empezar otro proyecto?** Sí: **Empezar un proyecto nuevo** (barra izquierda). Le da otro enlace; guarde los dos.
+**¿Puedo empezar otro proyecto?** Sí: **Empezar un proyecto nuevo** (barra izquierda). El anterior queda guardado en la carpeta de datos.
 
 **El cálculo se cortó.** Si recargó la página mientras calculaba, vuelva a pulsar el botón. Lo demás sigue guardado.
 
@@ -141,32 +138,7 @@ paga la inversión. Consiga cotizaciones reales, cámbielas en el Paso 8 y vea s
 
 ---
 
-## Para quien administra la app: publicarla en Render (gratis, con Postgres)
+## Para compartir Acomoda con otra persona
 
-El repositorio trae un archivo `render.yaml` que crea **la app y su base de datos Postgres gratuita** de una vez.
-
-1. Entre a [render.com](https://render.com) e inicie sesión con su cuenta de GitHub.
-2. **New → Blueprint** → elija el repositorio `ACOMODA` → **Apply**. Render crea dos cosas:
-   - `acomoda` (la app web, plan gratuito);
-   - `acomoda-db` (Postgres gratuito, donde se guarda el progreso de cada proyecto).
-
-   La primera construcción tarda de 5 a 10 minutos.
-3. Abra la dirección que Render le da (`https://acomoda-xxxx.onrender.com`). El tutorial está en la misma web:
-   botón **📘 Tutorial** o `https://SU-DOMINIO/?vista=tutorial`.
-4. **Dominio propio (opcional):** servicio `acomoda` → **Settings → Custom Domains** → agregue su dominio y cree en su
-   proveedor el registro CNAME que Render le indique.
-
-### Lo que hay que saber del plan gratuito de Render
-
-| Límite | Qué significa para usted |
-|---|---|
-| La app **se duerme tras 15 minutos** sin visitas | La primera visita después tarda ~1 minuto en abrir. El progreso no se pierde (está en Postgres). |
-| **512 MB de memoria** | Reportes de ventas muy grandes o la optimización completa pueden hacer que la app se reinicie. Si pasa, use la *Propuesta rápida* o suba el plan del servicio web (Starter). |
-| **El Postgres gratuito vence a los 30 días** de creado (luego hay 14 días de gracia y se borra) | Antes de que venza: pase la base a un plan pagado, **o** cree otra base gratuita y cambie la variable `DATABASE_URL` del servicio. Los proyectos guardados en la base vieja se pierden si no la mejora. |
-| Base de **1 GB** | Alcanza para decenas de proyectos. Los proyectos sin abrir en 25 días se borran solos (variable `ACOMODA_DIAS_CONSERVAR`). |
-| 750 horas gratis al mes | Suficiente para una app que se duerme cuando no se usa. |
-
-### Alternativa: Railway
-
-También funciona en Railway (archivos `Dockerfile` y `railway.json`): **New Project → Deploy from GitHub repo**, agregue
-un Postgres (**+ New → Database → PostgreSQL**) y en el servicio cree la variable `DATABASE_URL` = `${{Postgres.DATABASE_URL}}`.
+Copie la carpeta `Acomoda` (o el `Acomoda_Windows.zip`) y pídale que haga doble clic en `Acomoda.exe`. No necesita
+instalar Python ni tener internet. Sus datos no viajan con el programa, salvo que copie también `Acomoda_datos`.

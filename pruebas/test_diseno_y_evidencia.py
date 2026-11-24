@@ -357,7 +357,8 @@ def test_el_progreso_sobrevive_a_recargar_la_pagina(tmp_path, monkeypatch):
     segunda.run()
     assert segunda.session_state["paso_guardado_prueba"] == 3
     assert segunda.session_state["responsable"] == "Ana Prueba"
-    # Un enlace sin código abre un proyecto vacío
+    # Versión local: abrir sin código continúa el último proyecto
     tercera = AppTest.from_file(app, default_timeout=120)
     tercera.run()
-    assert "paso_guardado_prueba" not in tercera.session_state
+    assert not tercera.exception
+    assert tercera.session_state["paso_guardado_prueba"] == 3

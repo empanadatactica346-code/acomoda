@@ -11,21 +11,36 @@ Sirve para cualquier empresa; el caso de prueba es una tienda de Juliaca.
 
 ---
 
-## 1. Instalación (3 comandos)
+## 1. Instalación
 
-Necesita **Python 3.11 o más nuevo** (probado con 3.14). Abra una terminal (en Windows: «Símbolo del sistema»
-o PowerShell) y escriba:
+### Opción A — Instalador para compartir (no necesita Python ni internet)
+
+1. Comparta **`Instalar_Acomoda.exe`**. En la otra computadora, ábralo y siga el asistente (no pide administrador).
+2. Abra **Acomoda** desde el escritorio o el menú Inicio. Se abre una ventana negra (no la cierre) y luego el navegador con la app.
+3. Todo funciona **sin internet** y queda solo en esa computadora, en la carpeta `Acomoda_datos` junto al `.exe`.
+   Al volver a abrir Acomoda continúa el último proyecto.
+4. Para cerrar, cierre la ventana negra.
+
+> Si Windows muestra «Windows protegió su PC», pulse «Más información» → «Ejecutar de todas formas»
+> (el programa no está firmado digitalmente).
+
+### Opción B — Desde el código (Python 3.11+)
 
 ```
-cd Descargas\acomoda
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Se abrirá el navegador en `http://localhost:8501`. Para cerrar el programa, cierre la terminal o pulse `Ctrl + C`.
+### Volver a construir el ejecutable y el instalador
 
-> Si `pip` no se reconoce, use `python -m pip install -r requirements.txt`.
-> Si `streamlit` no se reconoce, use `python -m streamlit run app.py`.
+```
+pip install -r requirements.txt pyinstaller
+pyinstaller empaquetado/acomoda.spec --noconfirm
+"%LOCALAPPDATA%ProgramsInno Setup 6ISCC.exe" empaquetadoinstalador.iss
+```
+
+Los datos reales de `datos_entrada/` **no** se incluyen. Para incluirlos (botones «Usar el catálogo/reporte de prueba»),
+antes de construir ejecute `set ACOMODA_INCLUIR_PRUEBA=1`; hágalo solo si puede compartir esos datos.
 
 ---
 
@@ -386,14 +401,12 @@ acomoda/
 └── pruebas/                  pruebas automáticas (pytest)
 ```
 
-## 14. Versión web (Render o Railway)
+## 14. Versión local (ejecutable)
 
-- La app se publica tal cual con el `Dockerfile` y el `railway.json` incluidos. Los pasos detallados para usarla y
-  publicarla están en **TUTORIAL.md**, que también se ve dentro de la web (botón **📘 Tutorial** o `?vista=tutorial`).
-- **El progreso se guarda solo** en el servidor, por proyecto: el enlace lleva `?p=CODIGO`. Recargar la página no
-  borra nada. Si existe la variable `DATABASE_URL` (Postgres de Render o Railway) se guarda en la tabla
-  `acomoda_proyectos`; si no, en `datos_procesados/proyectos/`. El `render.yaml` crea la app y el Postgres gratuito.
-- Los datos reales (`datos_entrada/`) **no se suben** al repositorio (ver `.gitignore`); en la web, los botones
+- Acomoda funciona **solo en la computadora**, sin servidor ni internet. Ver sección 1 para el ejecutable.
+- **El progreso se guarda solo** en `Acomoda_datos/datos_procesados/proyectos/` (o `datos_procesados/proyectos/` si
+  se ejecuta desde el código). Al abrir de nuevo continúa el último proyecto.
+- Los datos reales (`datos_entrada/`) **no se suben** al repositorio (ver `.gitignore`); los botones
   "Usar el catálogo/reporte de prueba" solo aparecen si esos archivos existen.
 - El paso 7 muestra primero el recuadro **🎯 Decisión** (qué hacer, por qué, cuatro cifras y los siguientes pasos);
   el detalle estadístico queda oculto tras un interruptor. El paso 8 genera el **borrador del artículo en Word**

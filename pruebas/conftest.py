@@ -62,3 +62,13 @@ def local_un_estante(niveles=3, largo=2.4, capacidad=200):
 @pytest.fixture
 def ejemplo():
     return local_de_ejemplo()
+
+
+@pytest.fixture(autouse=True)
+def _proyectos_aislados(tmp_path, monkeypatch):
+    """Cada prueba guarda sus proyectos en una carpeta temporal (la versión local reanuda el último proyecto)."""
+    from modulos import guia, persistencia
+    carpeta = tmp_path / "proyectos"
+    carpeta.mkdir()
+    monkeypatch.setattr(persistencia, "CARPETA_PROYECTOS", carpeta)
+    monkeypatch.setattr(guia, "MARCA_BIENVENIDA", tmp_path / "bienvenida_vista.txt")

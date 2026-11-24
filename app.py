@@ -50,7 +50,7 @@ from modulos.modelo_optimo import optimizar, optimizar_diseno
 from modulos.normas import (CUMPLE, NO_APLICA, NO_CUMPLE, POR_VERIFICAR, cambiar_activa, cambiar_parametro,
                             cambiar_parametro_regla, estado_inicial, incompatibilidades_activas, parametros_activos,
                             reporte_final, resumen as resumen_normas, semaforo_local, texto_regla)
-from modulos import persistencia, reportes
+from modulos import guia, persistencia, reportes
 from modulos.visual_2d import plano_2d
 from modulos.visual_3d import figura_3d, guardar_html, recorrido_pedido
 
@@ -186,12 +186,56 @@ def cambiar_perfil():
     invalidar(1)
 
 
+@st.cache_data(show_spinner=False)
+def manual_en_cache():
+    return guia.manual_docx()
+
+
+@st.dialog("Recorrido de Acomoda", width="large")
+def recorrido():
+    i = st.session_state.get("_recorrido", 0)
+    icono, titulo, texto, elementos = guia.RECORRIDO[i]
+    puntos = "".join(f'<span class="{"act" if k == i else ""}">●</span>' for k in range(len(guia.RECORRIDO)))
+    st.html(f'<div class="ac-icono">{icono}</div><div class="ac-puntos">{puntos}</div>')
+    st.subheader(titulo)
+    st.markdown(texto)
+    for etiqueta, explicacion in elementos:
+        st.html(f'<div class="ac-tarjeta"><b>{etiqueta}</b><br>{explicacion}</div>')
+    atras, saltar, siguiente = st.columns([1, 1, 1.4])
+    if i > 0 and atras.button("⬅️ Anterior", width="stretch", key="tour_atras"):
+        st.session_state._recorrido = i - 1
+        st.rerun()
+    if i < len(guia.RECORRIDO) - 1:
+        if saltar.button("Saltar", width="stretch", key="tour_saltar"):
+            cerrar_recorrido()
+        if siguiente.button("Siguiente ➜", type="primary", width="stretch", key="tour_siguiente"):
+            st.session_state._recorrido = i + 1
+            st.rerun()
+    elif siguiente.button("🚀 Empezar", type="primary", width="stretch", key="tour_fin"):
+        cerrar_recorrido()
+
+
+def cerrar_recorrido():
+    guia.marcar_vista()
+    st.session_state._recorrido = None
+    st.rerun()
+
+
 def barra_lateral():
     with st.sidebar:
         st.title("📦 Acomoda")
         if st.button("📘 Tutorial paso a paso", width="stretch", key="abrir_tutorial"):
             st.session_state._ver_tutorial = True
             st.rerun()
+        columna_a, columna_b = st.columns(2)
+        if columna_a.button("🎓 Recorrido", width="stretch", key="abrir_recorrido",
+                            help="Vuelve a mostrar la presentación de bienvenida: qué hace cada botón y sección."):
+            st.session_state._recorrido = 0
+            st.rerun()
+        columna_b.download_button("⬇️ Manual", data=manual_en_cache(), file_name="Manual_Acomoda.docx",
+                                  mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                  width="stretch", key="descargar_manual",
+                                  help="Descarga el manual detallado del software en Word (para imprimir o compartir).")
         st.caption("Distribución óptima de productos en estantes · modelo de asignación (PuLP + CBC)")
         st.text_input("Responsable (queda en el acta)", key="responsable", placeholder="Nombre y apellido")
         st.selectbox("Perfil de rubro", list(PERFILES), key="perfil", format_func=lambda p: PERFILES[p]["nombre"],
@@ -210,10 +254,10 @@ def barra_lateral():
         st.caption("✅ confirmado · ⚠️ con advertencias · ⏳ pendiente · 🔒 bloqueado")
         st.divider()
         st.markdown("**💾 Su progreso se guarda solo**")
-        st.caption("Puede recargar la página o cerrar el navegador: al volver con **el mismo enlace** sigue donde se quedó. "
-                   "Guarde el enlace en favoritos y no lo comparta (quien lo tenga ve su proyecto).")
+        st.caption("Todo se guarda solo en esta computadora (nada sale a internet). Al volver a abrir Acomoda "
+                   "continúa el último proyecto.")
         st.code(f"Código de proyecto: {st.session_state.get('_proyecto', '')}", language=None)
-        if st.button("Empezar un proyecto nuevo", help="Abre un proyecto vacío con un enlace nuevo. El actual sigue guardado."):
+        if st.button("Empezar un proyecto nuevo", help="Abre un proyecto vacío. El actual sigue guardado con su código."):
             nuevo_proyecto()
         if st.button("Reiniciar todo", help="Borra los datos de ESTE proyecto (no se pueden recuperar)."):
             persistencia.borrar(st.session_state.get("_proyecto"))
@@ -227,6 +271,7 @@ def encabezado():
     paso = st.session_state.paso
     columna_titulo, columna_indice = st.columns([3, 1])
     columna_titulo.title(f"Paso {paso}. {PASOS[paso]}")
+    columna_titulo.html(guia.barra_progreso(paso, {p for p, v in st.session_state.confirmados.items() if v}))
     confiabilidad = indice_confiabilidad(st.session_state.catalogo, resumen_productos(), factor_local())
     columna_indice.metric("Índice de confiabilidad", f"{confiabilidad['indice']:.0f} %",
                           help=f"% de las ventas en soles con medidas reales ({confiabilidad['medidas_reales']:.0f} %, base: "
@@ -2232,9 +2277,11 @@ def restaurar_proyecto():
     """Al abrir la página: si el enlace trae ?p=CODIGO y ese proyecto existe, se recupera todo su estado."""
     if st.session_state.get("_proyecto_listo"):
         return
-    codigo = st.query_params.get("p")
+    codigo = st.query_params.get("p") or persistencia.ultimo()
     if persistencia.existe(codigo):
         for clave, valor in (persistencia.cargar(codigo) or {}).items():
+            if str(clave).startswith(BOTONES_NO_GUARDAR) or es_estado_de_tabla_editable(valor):
+                continue  # proyectos guardados con versiones anteriores
             try:
                 st.session_state[clave] = valor
             except Exception:  # p. ej. el estado de un botón: no se puede (ni hace falta) restaurar
@@ -2251,6 +2298,20 @@ def restaurar_proyecto():
     st.session_state._proyecto_listo = True
 
 
+# Botones y cargadores de archivos: Streamlit no deja restaurar su valor, por eso no se guardan
+BOTONES_NO_GUARDAR = ("FormSubmitter", "ir_", "boton_", "abrir_tutorial", "preparar_articulo", "aplicar_propuesta",
+                      "cerrar_propuesta", "editar_a_mano", "confirmar_", "form_atras", "form_crear", "form_siguiente", "tour_", "descargar_", "abrir_recorrido",
+                      "subir_", "editor_", "lienzo_")
+
+
+def es_estado_de_tabla_editable(valor):
+    """st.data_editor guarda {edited_rows, added_rows, deleted_rows}: Streamlit no deja restaurarlo."""
+    try:
+        return hasattr(valor, "keys") and {"edited_rows", "added_rows", "deleted_rows"} <= set(valor.keys())
+    except Exception:
+        return False
+
+
 def guardar_proyecto():
     codigo = st.session_state.get("_proyecto")
     if not codigo:
@@ -2258,11 +2319,13 @@ def guardar_proyecto():
     if st.query_params.get("p") != codigo:
         st.query_params["p"] = codigo  # el enlace siempre muestra el código, para que el usuario lo pueda guardar
     estado = {clave: valor for clave, valor in st.session_state.items()
-              if not str(clave).startswith("_") and not str(clave).startswith(("FormSubmitter", "ir_", "boton_"))}
+              if not str(clave).startswith("_") and not str(clave).startswith(BOTONES_NO_GUARDAR)
+              and not es_estado_de_tabla_editable(valor)}
     try:
         persistencia.guardar(codigo, estado, st.session_state._firmas)
+        persistencia.recordar_ultimo(codigo)
     except Exception as error:  # nunca interrumpir al usuario por un problema al guardar
-        st.sidebar.warning(f"No se pudo guardar el progreso en el servidor: {error}")
+        st.sidebar.warning(f"No se pudo guardar el progreso en esta computadora: {error}")
 
 
 def nuevo_proyecto():
@@ -2291,6 +2354,7 @@ def pagina_tutorial():
 
 def principal():
     evitar_traduccion()
+    st.html(guia.CSS)
     if st.query_params.get("vista") == "tutorial" and "_ver_tutorial" not in st.session_state:
         st.session_state._ver_tutorial = True
     restaurar_proyecto()
@@ -2310,6 +2374,10 @@ def principal():
         pantallas = {1: paso_1, 2: paso_2, 3: paso_3, 4: paso_4, 5: paso_5, 6: paso_6, 7: paso_7, 8: paso_8}
         pantallas[paso]()
         panel_rendimiento()
+        if "_recorrido" not in st.session_state:
+            st.session_state._recorrido = 0 if guia.primera_vez() else None
+        if st.session_state._recorrido is not None:
+            recorrido()
     finally:
         guardar_proyecto()  # también corre cuando un botón pide st.rerun()
 
