@@ -145,6 +145,8 @@ HOJAS_LOCAL = {
         columna("tipos_permitidos", "opcional", "texto", "Tipos de rack que acepta, separados por punto y coma (gondola_tienda; estante_ligero; rack_selectivo; estante_archivo; cantilever). Vacío = los disponibles del catálogo.", "", "estante_ligero;gondola_tienda"),
         columna("acepta_comprar", "opcional", "si_no", "¿Acepta comprar racks nuevos? 'no' obliga al modo B.", "", "si", SI_NO),
         columna("equipo_manipulacion", "opcional", "lista", "manual (a mano o carretilla) o mecanico (transpaleta, apilador, montacargas).", "", "manual", EQUIPOS_MANIPULACION),
+        columna("cobertura_total", "opcional", "si_no", "'si' = llenar todo el local con racks (propuesta de capacidad máxima, no solo para el stock actual).", "", "no", SI_NO),
+        columna("cobertura_porcentaje", "opcional", "numero_no_neg", "Porcentaje del área útil a cubrir con racks si cobertura_total = si (10 a 90).", "%", "40"),
     ],
     "EQUIPOS": [
         columna("tipo", "obligatoria", "lista", "Equipo con el que se mueve la mercadería.", "", "manual", TIPOS_EQUIPO),

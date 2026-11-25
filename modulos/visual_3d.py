@@ -130,7 +130,7 @@ def _estructura(local, parametros, simple=False):
     # Una sola malla por categoría de color: racks propuestos (nuevos) y racks existentes
     grupos = {}
     for estante in local.get("estantes", []):
-        nuevo = estante.get("existente") is False
+        nuevo = "vacio" if estante.get("vacio") else estante.get("existente") is False
         grupos.setdefault(nuevo, []).append(estante)
     for nuevo, estantes in grupos.items():
         trazas += _trazas_estantes(estantes, ajustes, simple, nuevo)
@@ -152,7 +152,10 @@ def _trazas_estantes(estantes, ajustes, simple, nuevo):
             bandejas.agregar(x0, y0, base - 0.03, x1, y1, base, f"{texto}<br>Nivel {numero}: base {base:.2f} m, libre {alto_libre:.2f} m")
         bandejas.agregar(x0, y0, alto - 0.02, x1, y1, alto, texto)
     if not marcos.vacia():
-        if nuevo:
+        if nuevo == "vacio":
+            trazas.append(marcos.malla("Racks propuestos (vacíos) — estructura", "#2e7d32", 1.0, hover=False))
+            trazas.append(bandejas.malla("Racks propuestos (vacíos)", "#a5d6a7", 0.6))
+        elif nuevo:
             trazas.append(marcos.malla("Racks propuestos (estructura)", "#8a5a00", 1.0, hover=False))
             trazas.append(bandejas.malla("Racks propuestos (bandejas)", "#f6c177", 0.85))
         else:

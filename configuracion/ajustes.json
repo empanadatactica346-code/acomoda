@@ -82,6 +82,8 @@
     "factor_llenado": 0.6,
     "margen_capacidad": 1.35,
     "lambda_inversion": 0.5,
+    "cobertura_defecto": 0.4,
+    "limite_candidatos_cobertura": 8000,
     "pasillo_equipo_mecanico_m": 1.8,
     "zonas_sin_racks": [
       "recepcion",

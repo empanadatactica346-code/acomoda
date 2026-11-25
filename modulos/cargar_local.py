@@ -49,7 +49,8 @@ def local_vacio():
 def preferencias_por_defecto():
     """Modo de diseño A (desde cero), sin tope de presupuesto, todos los tipos disponibles, equipo manual."""
     return {"modo_diseno": "A", "presupuesto_max_soles": None, "tipos_permitidos": [], "acepta_comprar": "si",
-            "equipo_manipulacion": "manual"}
+            "equipo_manipulacion": "manual", "cobertura_total": False,
+            "cobertura_porcentaje": float(cargar_ajustes()["diseno"].get("cobertura_defecto", 0.4))}
 
 
 def preferencias_de(local):
@@ -124,6 +125,8 @@ def local_a_tablas(local):
               "PASILLOS": "pasillos"}
     preferencias = preferencias_de(local)
     preferencias["tipos_permitidos"] = ";".join(preferencias.get("tipos_permitidos") or [])
+    preferencias["cobertura_total"] = "si" if preferencias.get("cobertura_total") else "no"
+    preferencias["cobertura_porcentaje"] = round(float(preferencias.get("cobertura_porcentaje") or 0.4) * 100, 1)
     tablas["PREFERENCIAS_Y_PRESUPUESTO"] = pd.DataFrame([{c["nombre"]: preferencias.get(c["nombre"])
                                                           for c in HOJAS_LOCAL["PREFERENCIAS_Y_PRESUPUESTO"]}])
     for hoja, clave in claves.items():
@@ -154,7 +157,12 @@ def tablas_a_local(tablas, fuente="excel"):
             "presupuesto_max_soles": a_numero(fila.get("presupuesto_max_soles")),
             "tipos_permitidos": [t.strip() for t in tipos.replace(",", ";").split(";") if t.strip()],
             "acepta_comprar": a_si_no(fila.get("acepta_comprar")) or "si",
-            "equipo_manipulacion": "mecanico" if str(fila.get("equipo_manipulacion") or "").lower().startswith("mec") else "manual"}
+            "equipo_manipulacion": "mecanico" if str(fila.get("equipo_manipulacion") or "").lower().startswith("mec") else "manual",
+            "cobertura_total": a_si_no(fila.get("cobertura_total")) == "si"}
+        porcentaje = a_numero(fila.get("cobertura_porcentaje"))
+        if porcentaje is not None:
+            porcentaje = porcentaje / 100 if porcentaje > 1 else porcentaje
+            local["preferencias"]["cobertura_porcentaje"] = min(0.9, max(0.1, porcentaje))
         if local["preferencias"]["acepta_comprar"] == "no":
             local["preferencias"]["modo_diseno"] = "B"
     for hoja, clave in claves.items():

@@ -70,8 +70,12 @@ def plano_2d(local, posiciones=None, ubicaciones=None, color_por="tipo", ids_con
             texto = (f"{estante['id']} ({estante['tipo']})<br>{estante['largo_m']} × {estante['fondo_m']} × {estante['alto_m']} m, "
                      f"{estante['niveles']} niveles, {estante['capacidad_kg_nivel']} kg/nivel<br>orientación {estante['orientacion']}°")
             color = "#f6c177" if estante.get("existente") is False else ("#6baed6" if not estante.get("estimado") else "#c6dbef")
-            _agregar_rect(figura, huella, color, "Rack propuesto" if estante.get("existente") is False else "Estante", texto,
-                          borde=borde, grosor=grosor, grupo="estante", mostrar=estante is local["estantes"][0])
+            nombre = "Rack propuesto" if estante.get("existente") is False else "Estante"
+            if estante.get("vacio"):
+                color, nombre, texto = "#a5d6a7", "Racks propuestos (vacíos)", texto + "<br>Capacidad disponible (vacío)"
+            _agregar_rect(figura, huella, color, nombre, texto, borde=borde, grosor=grosor, grupo=nombre,
+                          mostrar=nombre not in vistos)
+            vistos.add(nombre)
         else:
             tramos = posiciones[(posiciones["estante"] == estante["id"]) & (posiciones["nivel"] == 1)]
             for tramo in tramos.itertuples():

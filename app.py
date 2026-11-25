@@ -1,9 +1,3 @@
-"""ACOMODA — distribución óptima de productos en estantes.
-
-Ejecutar con:  streamlit run app.py
-
-Ocho pasos con compuertas: un paso no se abre hasta que el anterior esté confirmado.
-"""
 
 import copy
 import hashlib
@@ -62,11 +56,6 @@ ICONOS = {"confirmado": "✅", "advertencias": "⚠️", "pendiente": "⏳", "bl
 COLOR_SEMAFORO = {CUMPLE: "green", NO_CUMPLE: "red", POR_VERIFICAR: "orange", NO_APLICA: "gray"}
 CATALOGO_PRUEBA = CARPETA_ENTRADA / "lista_de_productos_limpio.xlsx"
 VENTAS_PRUEBA = next(iter(sorted(CARPETA_ENTRADA.glob("reporte_ventas_producto_*.xlsx"))), None)
-
-
-# ======================================================================================
-# Estado de la sesión
-# ======================================================================================
 
 def iniciar_estado():
     valores = {"paso": 1, "confirmados": {}, "advertencias": {}, "perfil": "bazar", "modo": PERFILES["bazar"]["modo_sugerido"],
@@ -173,11 +162,6 @@ def plantilla_vacia(tipo):
 def parametros_actuales():
     return parametros_activos(st.session_state.normas, st.session_state.modo, st.session_state.local)
 
-
-# ======================================================================================
-# Barra lateral y encabezado
-# ======================================================================================
-
 def cambiar_perfil():
     st.session_state.normas = estado_inicial(st.session_state.perfil)
     st.session_state.modo = PERFILES[st.session_state.perfil]["modo_sugerido"]
@@ -281,11 +265,6 @@ def encabezado():
                    "Mida primero los productos que más venden (plantilla prellenada del Paso 1 o 3).")
     if st.session_state.local and st.session_state.local.get("es_ejemplo"):
         st.error("Se está usando el LOCAL DE EJEMPLO — EJEMPLO, NO ES REAL. Úselo solo para aprender el programa.")
-
-
-# ======================================================================================
-# Paso 1. Catálogo
-# ======================================================================================
 
 @st.cache_data(show_spinner=False, max_entries=4)
 def catalogo_en_cache(contenido, nombre, perfil):
@@ -1217,6 +1196,13 @@ def paso_5():
         equipo = columnas[2].radio("Equipo de manipulación", ["manual", "mecanico"],
                                    index=0 if pref.get("equipo_manipulacion") != "mecanico" else 1,
                                    format_func={"manual": "Manual (a mano o carretilla)", "mecanico": "Mecánico (transpaleta, montacargas)"}.get)
+        columnas = st.columns(2)
+        cobertura = columnas[0].checkbox("Llenar todo el local (mostrar capacidad máxima)", bool(pref.get("cobertura_total")),
+                                         help="Sigue agregando racks por todo el local aunque el stock actual no los necesite. "
+                                              "Los que sobran quedan vacíos como capacidad disponible.")
+        porcentaje = columnas[1].slider("% de área útil a cubrir con racks", 10, 90,
+                                        int(round(float(pref.get("cobertura_porcentaje") or
+                                                        AJUSTES["diseno"].get("cobertura_defecto", 0.4)) * 100)), 5)
         lam = st.slider("Priorizar ahorro de recorrido  ⟵ λ ⟶  priorizar menor inversión", 0.0, 3.0,
                         float(st.session_state.get("lambda_diseno", AJUSTES["diseno"]["lambda_inversion"])), 0.1,
                         help="λ = 0: solo importa el recorrido. λ = 1: la inversión anualizada pesa lo mismo que el recorrido de la "
@@ -1229,7 +1215,8 @@ def paso_5():
         columnas[2].caption("La brecha es cuánto puede alejarse la solución del óptimo demostrado.")
         if st.form_submit_button("Aplicar preferencias"):
             pref.update(modo_diseno=modo_diseno, presupuesto_max_soles=presupuesto or None, equipo_manipulacion=equipo,
-                        acepta_comprar="no" if modo_diseno == "B" else "si")
+                        acepta_comprar="no" if modo_diseno == "B" else "si", cobertura_total=bool(cobertura),
+                        cobertura_porcentaje=porcentaje / 100)
             st.session_state.update(lambda_diseno=lam, tiempo_diseno=tiempo, brecha_diseno=brecha)
             invalidar(5)
             st.rerun()
@@ -1415,6 +1402,10 @@ def mostrar_diseno(solucion):
     columnas[3].metric("Costo anualizado*", formato_soles(solucion["costo_anualizado_racks"]))
     st.caption(f"* {ROTULO_PRECIOS}. Modo {solucion['modo_diseno']}, λ = {solucion['lambda']:.2f}, "
                f"{solucion['candidatos']:,} módulos candidatos generados por reglas geométricas.")
+    if (solucion.get("cobertura") or {}).get("activa"):
+        st.warning("Propuesta de **capacidad máxima** (llenar todo el local), no del stock actual: "
+                   f"{solucion['cobertura']['modulos_vacios']} racks quedan vacíos (en verde en las vistas 2D/3D) y su costo "
+                   "está incluido en la lista de compra y el costeo.")
     for aviso in solucion.get("avisos_diseno", []):
         st.caption(f"ℹ️ {aviso}")
     if len(solucion["lista_compra"]):
@@ -1945,6 +1936,10 @@ def paso_8():
     exportar_articulo_pantalla()
     st.divider()
     st.subheader("Costeo editable (dos escenarios)")
+    solucion_actual = st.session_state.get("solucion") or {}
+    if (solucion_actual.get("cobertura") or {}).get("activa"):
+        st.info("El costeo incluye TODOS los racks de la propuesta de capacidad máxima (también los vacíos): "
+                "no corresponde solo al stock actual.")
     st.caption(f"Edite cantidades y precios: el total, el ahorro, la recuperación, el VAN y la TIR se recalculan al instante sin "
                f"volver a optimizar. Precios de racks: {ROTULO_PRECIOS}.")
     costeo_fragmento()
@@ -2178,6 +2173,9 @@ def generar_entregables(reubicacion, economia, nombre_antes_texto):
         "Local": f"{local.get('nombre') or '-'} ({local['largo_m']} × {local['ancho_m']} m){' — EJEMPLO, NO ES REAL' if local.get('es_ejemplo') else ''}",
         "Modo": solucion["modo"], "Modo de diseño": solucion["modo_diseno"], "Perfil": PERFILES[st.session_state.perfil]["nombre"],
         "Módulos nuevos": solucion["modulos_nuevos"], "Inversión en racks (S/, supuesto)": solucion["inversion_racks"],
+        "Tipo de propuesta": ("Capacidad máxima (llenar el local), no del stock actual; "
+                              f"{len(solucion.get('modulos_vacios', []))} racks vacíos")
+        if (solucion.get("cobertura") or {}).get("activa") else "Según el stock actual",
         "Estado del solver": solucion["estado"], "Brecha": "—" if solucion["brecha"] is None else f"{solucion['brecha'] * 100:.2f} %",
         "Tiempo (s)": solucion["tiempo_s"], "Productos ubicados": int(solucion["ubicaciones"]["ubicado"].sum()),
         "Productos sin ubicar": int((~solucion["ubicaciones"]["ubicado"]).sum()),

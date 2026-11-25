@@ -434,6 +434,114 @@ def seleccionar_modulos(candidatos, conflictos, volumen_objetivo, presupuesto=No
     return elegidos
 
 
+def area_util(local, parametros, ajustes=None, resolucion=0.1):
+    """Área útil (m²): contorno del local menos zonas prohibidas, funcionales, despejes y obstáculos sólidos."""
+    ajustes = ajustes or cargar_ajustes()
+    caja = contorno(local)
+    columnas = max(1, int(round((caja[2] - caja[0]) / resolucion)))
+    filas = max(1, int(round((caja[3] - caja[1]) / resolucion)))
+    ocupada = np.zeros((filas, columnas), dtype=bool)
+    for r in zonas_prohibidas(local, parametros, ajustes)["huella"]:
+        c0, c1 = int(max(0, math.floor(r[0] / resolucion))), int(min(columnas, math.ceil(r[2] / resolucion)))
+        f0, f1 = int(max(0, math.floor(r[1] / resolucion))), int(min(filas, math.ceil(r[3] / resolucion)))
+        if c1 > c0 and f1 > f0:
+            ocupada[f0:f1, c0:c1] = True
+    return round(float((~ocupada).sum()) * resolucion * resolucion, 3)
+
+
+def _franja_espalda(tabla, grosor=0.06):
+    """Franja delgada detrás de cada candidato (lado opuesto al pasillo): sirve para saber si la espalda se apoya."""
+    x0, y0, x1, y1 = (tabla[c].to_numpy() for c in ("x0", "y0", "x1", "y1"))
+    o = tabla["orientacion"].to_numpy() if "orientacion" in tabla else np.zeros(len(tabla))
+    bx0 = np.where(o == 90, x0 - grosor, np.where(o == 270, x1, x0))
+    bx1 = np.where(o == 90, x0, np.where(o == 270, x1 + grosor, x1))
+    by0 = np.where(o == 0, y1, np.where(o == 180, y0 - grosor, y0))
+    by1 = np.where(o == 0, y1 + grosor, np.where(o == 180, y0, y1))
+    return bx0 + 0.01, by0 + 0.01, bx1 - 0.01, by1 - 0.01
+
+
+def seleccionar_modulos_cobertura(candidatos, conflictos, area_util_m2, porcentaje, presupuesto=None, ya_elegidos=(),
+                                  excluir=()):
+    """Modo «llenar todo el local»: agrega módulos compatibles, repartidos por todo el local, hasta que la suma de
+    huellas (largo × fondo) alcance porcentaje × área útil, o se agote el presupuesto o los candidatos.
+
+    Orden: un módulo por celda de 2 × 2 m por turnos (el mejor de cada celda primero, como en generar_candidatos),
+    primero el patrón perimetral y luego filas/islas. Se prefieren los candidatos con la espalda apoyada (contra un
+    muro o espalda con espalda con otro rack ya elegido), así cada pasillo sirve a dos frentes y el área se aprovecha.
+    Los conflictos (choques y pasillos tapados) se respetan igual que en seleccionar_modulos.
+    Devuelve la lista de índices elegidos (incluye `ya_elegidos`)."""
+    if not len(candidatos):
+        return list(ya_elegidos)
+    vecinos = {}
+    for a, b in conflictos:
+        vecinos.setdefault(int(a), set()).add(int(b))
+        vecinos.setdefault(int(b), set()).add(int(a))
+    tabla = candidatos.copy()
+    tabla["huella_m2"] = (tabla["x1"] - tabla["x0"]) * (tabla["y1"] - tabla["y0"])
+    patron = tabla["patron"] if "patron" in tabla else pd.Series("fila/isla", index=tabla.index)
+    tabla["_rango"] = np.where(patron == "perimetral", 0, 1)
+    tabla["_celda"] = (tabla["x0"] // 2).astype(int).astype(str) + "_" + (tabla["y0"] // 2).astype(int).astype(str)
+    tabla = tabla.sort_values(["_rango", "calidad"])
+    tabla["_turno"] = tabla.groupby(["_rango", "_celda"]).cumcount()
+    tabla = tabla.sort_values(["_rango", "_turno", "calidad"])
+    indices = tabla.index.to_numpy()
+    posicion_de = {k: n for n, k in enumerate(indices)}
+    H = tabla[["x0", "y0", "x1", "y1"]].to_numpy()
+    bx0, by0, bx1, by1 = _franja_espalda(tabla)
+    # Espalda contra un muro: la franja de atrás sale del local
+    xmin, ymin, xmax, ymax = H[:, 0].min(), H[:, 1].min(), H[:, 2].max(), H[:, 3].max()
+    apoyada = (bx0 < xmin) | (by0 < ymin) | (bx1 > xmax) | (by1 > ymax)
+    # Franjas a los costados: un rack al lado, con la misma orientación, continúa la fila
+    orient = tabla["orientacion"].to_numpy() if "orientacion" in tabla else np.zeros(len(tabla))
+    horizontal = np.isin(orient, (0, 180))
+    sx0 = np.where(horizontal, H[:, 0] - 0.06, H[:, 0] + 0.01)
+    sx1 = np.where(horizontal, H[:, 2] + 0.06, H[:, 2] - 0.01)
+    sy0 = np.where(horizontal, H[:, 1] + 0.01, H[:, 1] - 0.06)
+    sy1 = np.where(horizontal, H[:, 3] - 0.01, H[:, 3] + 0.06)
+    en_fila = np.zeros(len(indices), dtype=bool)
+    libre = np.ones(len(indices), dtype=bool)
+    costo = tabla["costo_inversion"].to_numpy(dtype=float)
+    huella = tabla["huella_m2"].to_numpy(dtype=float)
+    objetivo = max(0.0, float(porcentaje)) * float(area_util_m2)
+    elegidos = list(ya_elegidos)
+    cubierta, gasto = 0.0, 0.0
+
+    def tomar(k):
+        nonlocal cubierta, gasto
+        n = posicion_de.get(k)
+        bloqueados = [posicion_de[v] for v in vecinos.get(k, ()) if v in posicion_de]
+        libre[bloqueados] = False
+        if n is None:
+            return
+        libre[n] = False
+        cubierta += huella[n]
+        gasto += costo[n]
+        h = H[n]
+        apoyada[(bx0 < h[2]) & (h[0] < bx1) & (by0 < h[3]) & (h[1] < by1)] = True
+        en_fila[(sx0 < h[2]) & (h[0] < sx1) & (sy0 < h[3]) & (h[1] < sy1) & (orient == orient[n])] = True
+
+    for k in excluir:
+        if k in posicion_de:
+            libre[posicion_de[k]] = False
+    for k in elegidos:
+        tomar(int(k))
+    while cubierta < objetivo:
+        disponibles = libre.copy()
+        if presupuesto is not None:
+            disponibles &= gasto + costo <= presupuesto + 1e-6
+        if not disponibles.any():
+            break
+        n = None
+        for preferidos in (disponibles & apoyada & en_fila, disponibles & apoyada, disponibles & en_fila, disponibles):
+            if preferidos.any():
+                n = int(np.argmax(preferidos))
+                break
+        k = int(indices[n])
+        elegidos.append(k)
+        tomar(k)
+    return elegidos
+
+
 def lista_de_compra(estantes_instalados):
     """Tabla de compra: un renglón por tipo de rack nuevo con cantidad y costo (precios referenciales)."""
     nuevos = [e for e in estantes_instalados if not e.get("existente")]
@@ -445,6 +553,10 @@ def lista_de_compra(estantes_instalados):
                                                    montaje_unitario=("montaje", "first")).reset_index()
     compra["subtotal"] = compra["cantidad"] * (compra["precio_unitario"] + compra["montaje_unitario"])
     compra["nota"] = ROTULO_PRECIOS
+    vacios = tabla.assign(vacio=[bool(e.get("vacio")) for e in nuevos]).groupby(["tipo", "nombre"])["vacio"].sum()
+    if vacios.any():
+        compra["vacios_capacidad_disponible"] = [int(vacios.get((t, n), 0)) for t, n in zip(compra["tipo"], compra["nombre"])]
+        compra["nota"] = ROTULO_PRECIOS + "; incluye racks vacíos de la propuesta de capacidad máxima"
     return compra
 
 
@@ -456,7 +568,8 @@ def tabla_diseno(estantes_instalados):
         filas.append({"modulo": e["id"], "tipo": e.get("tipo_rack") or e["tipo"], "origen": "existente" if e.get("existente") else "nuevo",
                       "x_m": e["x_m"], "y_m": e["y_m"], "huella": f"{x1 - x0:.2f} × {y1 - y0:.2f} m",
                       "alto_m": e["alto_m"], "niveles": e["niveles"], "capacidad_kg_nivel": e["capacidad_kg_nivel"],
-                      "orientacion": e["orientacion"], "patron": e.get("patron", "")})
+                      "orientacion": e["orientacion"], "patron": e.get("patron", ""),
+                      "estado": "capacidad disponible" if e.get("vacio") else "con productos"})
     return pd.DataFrame(filas)
 
 
