@@ -82,7 +82,7 @@
     "factor_llenado": 0.6,
     "margen_capacidad": 1.35,
     "lambda_inversion": 0.5,
-    "cobertura_defecto": 0.4,
+    "cobertura_defecto": 0.65,
     "limite_candidatos_cobertura": 8000,
     "pasillo_equipo_mecanico_m": 1.8,
     "zonas_sin_racks": [
@@ -92,7 +92,9 @@
       "cuarentena",
       "caja",
       "ingreso"
-    ]
+    ],
+    "cobertura_por_defecto": true,
+    "despeje_ingreso_m": 2.0
   },
   "evidencia": {
     "_nota": "Simulación con pedidos reales y estadística (Cambio 3).",

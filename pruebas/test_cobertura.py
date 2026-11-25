@@ -38,6 +38,7 @@ def casos():
                                    for k in range(8)])
     resumen = resumen_sintetico(catalogo, [round(1.5 - 0.1 * k, 2) for k in range(8)])
     normal = local_grande()
+    normal["preferencias"] = dict(preferencias_de(normal), cobertura_total=False)
     parametros = parametros_geometria_por_defecto(normal)
     lleno = copy.deepcopy(normal)
     lleno["preferencias"] = dict(preferencias_de(lleno), cobertura_total=True, cobertura_porcentaje=PORCENTAJE)
@@ -102,3 +103,43 @@ def test_modelo_completo_conserva_racks_vacios(casos):
     assert len(vacios) == len(sol["modulos_vacios"])
     assert int(sol["ubicaciones"]["ubicado"].sum()) == len(catalogo)
     assert "capacidad disponible" in set(sol["tabla_diseno"]["estado"])
+
+
+def local_34x15():
+    local = local_vacio()
+    local.update(nombre="tienda 34 × 15", largo_m=34.0, ancho_m=15.0, altura_libre_m=3.2)
+    local["obstaculos"] = [{"id": "P1", "tipo": "puerta", "x_m": 15.0, "y_m": 0.0, "largo_m": 2.0, "ancho_m": 0.2, "alto_m": 2.4},
+                           {"id": "S1", "tipo": "salida_emergencia", "x_m": 33.8, "y_m": 7.0, "largo_m": 0.2, "ancho_m": 1.2,
+                            "alto_m": 2.2},
+                           {"id": "C1", "tipo": "columna", "x_m": 11.0, "y_m": 7.3, "largo_m": 0.4, "ancho_m": 0.4, "alto_m": 3.2},
+                           {"id": "C2", "tipo": "columna", "x_m": 22.0, "y_m": 7.3, "largo_m": 0.4, "ancho_m": 0.4, "alto_m": 3.2}]
+    local["zonas"] = [{"id": "Z1", "tipo": "ingreso", "x_m": 15.0, "y_m": 0.0, "largo_m": 2.0, "ancho_m": 1.2},
+                      {"id": "Z2", "tipo": "caja", "x_m": 18.5, "y_m": 0.3, "largo_m": 2.5, "ancho_m": 1.2},
+                      {"id": "Z3", "tipo": "despacho", "x_m": 0.3, "y_m": 0.3, "largo_m": 2.5, "ancho_m": 1.5}]
+    local["pasillos"] = [{"uso": "peatonal", "ancho_min_m": 0.9}]
+    local["equipos"] = [{"tipo": "manual", "radio_giro_m": 0, "altura_max_m": 1.9}]
+    return local
+
+
+def test_tienda_34x15_racks_en_todo_el_local_y_entrada_libre():
+    from modulos.comun import cargar_ajustes
+    from modulos.interpretar_local import ampliar, rect
+    catalogo = catalogo_sintetico([{"producto": f"P{k}", "largo_cm": 10, "ancho_cm": 8, "alto_cm": 12, "peso_kg": 0.3}
+                                   for k in range(10)])
+    resumen = resumen_sintetico(catalogo, [round(1.5 - 0.1 * k, 2) for k in range(10)])
+    local = local_34x15()  # preferencias por defecto: cobertura activa
+    parametros = parametros_geometria_por_defecto(local)
+    sol = optimizar_diseno(catalogo, resumen, local, parametros, [], None, "tienda", rapido=True)
+    estantes = sol["local"]["estantes"]
+    assert estantes
+    cuadrantes = set()
+    for e in estantes:
+        x0, y0, x1, y1 = huella_estante(e)
+        cuadrantes.add((((x0 + x1) / 2) >= 17.0, ((y0 + y1) / 2) >= 7.5))
+    assert len(cuadrantes) >= 3, cuadrantes
+    despeje = cargar_ajustes()["diseno"]["despeje_ingreso_m"]
+    entradas = [ampliar(rect(z["x_m"], z["y_m"], z["largo_m"], z["ancho_m"]), despeje) for z in local["zonas"]
+                if z["tipo"] in ("ingreso", "caja")]
+    for e in estantes:
+        assert not any(se_cruzan(huella_estante(e), z) for z in entradas), e["id"]
+    assert sol["cobertura"]["fraccion_lograda"] > 0.3

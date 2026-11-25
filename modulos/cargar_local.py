@@ -47,9 +47,10 @@ def local_vacio():
 
 
 def preferencias_por_defecto():
-    """Modo de diseño A (desde cero), sin tope de presupuesto, todos los tipos disponibles, equipo manual."""
+    """Modo de diseño A (desde cero), sin tope de presupuesto, todos los tipos disponibles, equipo manual y racks
+    repartidos por toda el área útil (cobertura)."""
     return {"modo_diseno": "A", "presupuesto_max_soles": None, "tipos_permitidos": [], "acepta_comprar": "si",
-            "equipo_manipulacion": "manual", "cobertura_total": False,
+            "equipo_manipulacion": "manual", "cobertura_total": bool(cargar_ajustes()["diseno"].get("cobertura_por_defecto", True)),
             "cobertura_porcentaje": float(cargar_ajustes()["diseno"].get("cobertura_defecto", 0.4))}
 
 
@@ -158,7 +159,7 @@ def tablas_a_local(tablas, fuente="excel"):
             "tipos_permitidos": [t.strip() for t in tipos.replace(",", ";").split(";") if t.strip()],
             "acepta_comprar": a_si_no(fila.get("acepta_comprar")) or "si",
             "equipo_manipulacion": "mecanico" if str(fila.get("equipo_manipulacion") or "").lower().startswith("mec") else "manual",
-            "cobertura_total": a_si_no(fila.get("cobertura_total")) == "si"}
+            "cobertura_total": (a_si_no(fila.get("cobertura_total")) or ("si" if preferencias_por_defecto()["cobertura_total"] else "no")) == "si"}
         porcentaje = a_numero(fila.get("cobertura_porcentaje"))
         if porcentaje is not None:
             porcentaje = porcentaje / 100 if porcentaje > 1 else porcentaje

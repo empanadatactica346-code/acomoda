@@ -1187,22 +1187,34 @@ def paso_5():
                     "+ penalizaciones.")
     else:
         st.markdown("**Objetivo (tienda):** maximizar Σ margen esperado × exposición × x − λ × Σ costo anualizado del rack × z.")
+    # Estos tres valores se aplican al instante (fuera del formulario): «Calcular» siempre usa lo que se ve en pantalla
+    columnas = st.columns(3)
+    presupuesto = columnas[0].number_input("Presupuesto máximo para racks (S/; 0 = sin tope)", 0.0, 1e8,
+                                           float(pref.get("presupuesto_max_soles") or 0.0), 100.0, key="ui_presupuesto")
+    cobertura = columnas[1].checkbox("Llenar todo el local (repartir racks por toda el área útil)",
+                                     bool(pref.get("cobertura_total", AJUSTES["diseno"].get("cobertura_por_defecto", True))),
+                                     key="ui_cobertura",
+                                     help="Reparte los racks en filas por toda el área útil aunque el stock actual no los necesite. "
+                                          "Los que sobran quedan vacíos como capacidad disponible. Desmarcado: solo los racks "
+                                          "que pide el stock (igual repartidos, nunca amontonados junto al despacho).")
+    porcentaje = columnas[2].slider("% de área útil a cubrir con racks", 10, 90,
+                                    int(round(float(pref.get("cobertura_porcentaje") or
+                                                    AJUSTES["diseno"].get("cobertura_defecto", 0.65)) * 100)), 5,
+                                    key="ui_porcentaje", disabled=not cobertura)
+    nuevos_valores = {"presupuesto_max_soles": presupuesto or None, "cobertura_total": bool(cobertura),
+                      "cobertura_porcentaje": porcentaje / 100}
+    if any(pref.get(k) != v for k, v in nuevos_valores.items()):
+        pref.update(nuevos_valores)
+        if st.session_state.solucion is not None:
+            invalidar(5)
+            st.warning("Cambió el presupuesto o la cobertura: la propuesta anterior se descartó. Vuelva a calcular.")
     with st.form("form_diseno"):
-        columnas = st.columns(3)
+        columnas = st.columns(2)
         modo_diseno = columnas[0].radio("Modo de diseño", list(MODOS_DISENO), format_func=MODOS_DISENO.get,
                                         index=list(MODOS_DISENO).index(pref.get("modo_diseno", "A")))
-        presupuesto = columnas[1].number_input("Presupuesto máximo para racks (S/; 0 = sin tope)", 0.0, 1e8,
-                                               float(pref.get("presupuesto_max_soles") or 0.0), 100.0)
-        equipo = columnas[2].radio("Equipo de manipulación", ["manual", "mecanico"],
+        equipo = columnas[1].radio("Equipo de manipulación", ["manual", "mecanico"],
                                    index=0 if pref.get("equipo_manipulacion") != "mecanico" else 1,
                                    format_func={"manual": "Manual (a mano o carretilla)", "mecanico": "Mecánico (transpaleta, montacargas)"}.get)
-        columnas = st.columns(2)
-        cobertura = columnas[0].checkbox("Llenar todo el local (mostrar capacidad máxima)", bool(pref.get("cobertura_total")),
-                                         help="Sigue agregando racks por todo el local aunque el stock actual no los necesite. "
-                                              "Los que sobran quedan vacíos como capacidad disponible.")
-        porcentaje = columnas[1].slider("% de área útil a cubrir con racks", 10, 90,
-                                        int(round(float(pref.get("cobertura_porcentaje") or
-                                                        AJUSTES["diseno"].get("cobertura_defecto", 0.4)) * 100)), 5)
         lam = st.slider("Priorizar ahorro de recorrido  ⟵ λ ⟶  priorizar menor inversión", 0.0, 3.0,
                         float(st.session_state.get("lambda_diseno", AJUSTES["diseno"]["lambda_inversion"])), 0.1,
                         help="λ = 0: solo importa el recorrido. λ = 1: la inversión anualizada pesa lo mismo que el recorrido de la "
@@ -1213,10 +1225,10 @@ def paso_5():
         brecha = columnas[1].number_input("Brecha aceptada (%)", 0.0, 20.0,
                                           float(st.session_state.get("brecha_diseno", AJUSTES["solver"]["brecha_relativa"] * 100)), 0.5)
         columnas[2].caption("La brecha es cuánto puede alejarse la solución del óptimo demostrado.")
+        st.caption("Modo, equipo, λ, tiempo y brecha se aplican al pulsar «Aplicar preferencias».")
         if st.form_submit_button("Aplicar preferencias"):
-            pref.update(modo_diseno=modo_diseno, presupuesto_max_soles=presupuesto or None, equipo_manipulacion=equipo,
-                        acepta_comprar="no" if modo_diseno == "B" else "si", cobertura_total=bool(cobertura),
-                        cobertura_porcentaje=porcentaje / 100)
+            pref.update(modo_diseno=modo_diseno, equipo_manipulacion=equipo,
+                        acepta_comprar="no" if modo_diseno == "B" else "si")
             st.session_state.update(lambda_diseno=lam, tiempo_diseno=tiempo, brecha_diseno=brecha)
             invalidar(5)
             st.rerun()
@@ -1402,7 +1414,15 @@ def mostrar_diseno(solucion):
     columnas[3].metric("Costo anualizado*", formato_soles(solucion["costo_anualizado_racks"]))
     st.caption(f"* {ROTULO_PRECIOS}. Modo {solucion['modo_diseno']}, λ = {solucion['lambda']:.2f}, "
                f"{solucion['candidatos']:,} módulos candidatos generados por reglas geométricas.")
-    if (solucion.get("cobertura") or {}).get("activa"):
+    cob = solucion.get("cobertura") or {}
+    if cob.get("area_util_m2"):
+        columnas = st.columns(3)
+        columnas[0].metric("Área útil cubierta con racks", f"{cob['fraccion_lograda']:.0%}",
+                           help=f"{cob['area_cubierta_m2']:,.1f} m² de {cob['area_util_m2']:,.1f} m² útiles")
+        columnas[1].metric("Área útil del local", f"{cob['area_util_m2']:,.1f} m²")
+        columnas[2].metric("Racks vacíos (capacidad disponible)", cob.get("modulos_vacios", 0))
+    st.plotly_chart(plano_2d(solucion["local"], parametros=parametros_actuales()), key="plano_diseno")
+    if cob.get("activa"):
         st.warning("Propuesta de **capacidad máxima** (llenar todo el local), no del stock actual: "
                    f"{solucion['cobertura']['modulos_vacios']} racks quedan vacíos (en verde en las vistas 2D/3D) y su costo "
                    "está incluido en la lista de compra y el costeo.")

@@ -1,7 +1,7 @@
 ; Instalador de Acomoda.  Compilar: ISCC empaquetado\instalador.iss  (después de pyinstaller)
 [Setup]
 AppName=Acomoda
-AppVersion=3.2
+AppVersion=3.3
 AppPublisher=Acomoda
 DefaultDirName={localappdata}\Programs\Acomoda
 DefaultGroupName=Acomoda

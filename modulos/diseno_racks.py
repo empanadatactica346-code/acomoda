@@ -157,6 +157,12 @@ def zonas_prohibidas(local, parametros, ajustes=None):
     despejes = [ampliar(huella_obstaculo(o), margenes[o["tipo"]]) for o in local.get("obstaculos", []) if o["tipo"] in margenes]
     funcionales = [rect(z["x_m"], z["y_m"], z["largo_m"], z["ancho_m"]) for z in local.get("zonas", [])
                    if z.get("tipo") in ajustes["diseno"]["zonas_sin_racks"]]
+    # Zona de entrada libre para los clientes: ningún rack a menos de despeje_ingreso_m del ingreso, la caja o una puerta
+    despeje_ingreso = float(ajustes["diseno"].get("despeje_ingreso_m", 0.0) or 0.0)
+    entradas = [ampliar(rect(z["x_m"], z["y_m"], z["largo_m"], z["ancho_m"]), despeje_ingreso) for z in local.get("zonas", [])
+                if z.get("tipo") in ("ingreso", "caja")]
+    entradas += [ampliar(huella_obstaculo(o), despeje_ingreso) for o in local.get("obstaculos", []) if o["tipo"] == "puerta"]
+    funcionales += entradas if despeje_ingreso > 0 else []
     pasillos_existentes = [rect_frente(e, 0.02, float(e["largo_m"]) - 0.02, requerido) for e in local.get("estantes", [])]
     return {"huella": solidos + existentes + despejes + funcionales + pasillos_existentes, "pasillo": solidos + existentes,
             "requerido": requerido}
@@ -273,20 +279,20 @@ def generar_candidatos(local, parametros, tipos, ajustes=None, avance=None):
     tabla["volumen_util_m3"] = [por_tipo[t]["largo_m"] * por_tipo[t]["fondo_m"] * (por_tipo[t]["alto_m"] - 0.1) for t in tabla["tipo"]]
     tabla["costo_inversion"] = [por_tipo[t]["costo_inversion"] for t in tabla["tipo"]]
     tabla["costo_anualizado"] = [por_tipo[t]["costo_anualizado"] for t in tabla["tipo"]]
-    # Calidad: cerca del despacho y con buen volumen por sol invertido
-    distancia_norm = tabla["distancia_m"] / max(tabla["distancia_m"].max(), 1e-6)
+    # Calidad (menor = mejor): SOLO aprovechamiento. Volumen por sol invertido y espalda apoyada contra un muro.
+    # La distancia al despacho NO decide dónde van los racks: solo se usa después para asignar productos.
     eficiencia = tabla["volumen_util_m3"] / tabla["costo_anualizado"].clip(lower=1e-6)
-    tabla["calidad"] = (distancia_norm - 0.3 * eficiencia / max(eficiencia.max(), 1e-9)).round(5)
+    espalda_muro = [_patron((r.x0, r.y0, r.x1, r.y1), local) == "perimetral" for r in tabla.itertuples()]
+    tabla["calidad"] = (-eficiencia / max(eficiencia.max(), 1e-9) - 0.5 * np.array(espalda_muro, dtype=float)).round(5)
     if len(tabla) > limite:
-        # Se conservan los mejores de cada zona de 2 × 2 m y cada tipo, por turnos, para cubrir todo el local
-        tabla["_celda"] = (tabla["tipo"] + "_" + (tabla["x0"] // 2).astype(int).astype(str) + "_" +
-                           (tabla["y0"] // 2).astype(int).astype(str))
+        # Recorte uniforme: por turnos, el mejor candidato de cada celda de 2 × 2 m, así sobreviven en todo el local
+        tabla["_celda"] = (tabla["x0"] // 2).astype(int).astype(str) + "_" + (tabla["y0"] // 2).astype(int).astype(str)
         tabla = tabla.sort_values("calidad")
         tabla["_turno"] = tabla.groupby("_celda").cumcount()
         tabla = tabla.sort_values(["_turno", "calidad"]).head(limite).drop(columns=["_celda", "_turno"])
         info["reducidos"] = info["generados"] - limite
-        info["aviso"] = (f"Se generaron {info['generados']:,} candidatos; se conservaron los {limite:,} mejores "
-                         "(más cerca del despacho y con mejor aprovechamiento, repartidos por todo el local).")
+        info["aviso"] = (f"Se generaron {info['generados']:,} candidatos; se conservaron {limite:,} repartidos de forma "
+                         "uniforme por todo el local (los de mejor aprovechamiento de cada zona de 2 × 2 m).")
     tabla = tabla.sort_values(["calidad"]).reset_index(drop=True)
     tabla["id"] = [f"M{k + 1:04d}" for k in range(len(tabla))]
     tabla["patron"] = [_patron((r.x0, r.y0, r.x1, r.y1), local) for r in tabla.itertuples()]
@@ -461,7 +467,7 @@ def _franja_espalda(tabla, grosor=0.06):
 
 
 def seleccionar_modulos_cobertura(candidatos, conflictos, area_util_m2, porcentaje, presupuesto=None, ya_elegidos=(),
-                                  excluir=()):
+                                  excluir=(), volumen_objetivo=0.0):
     """Modo «llenar todo el local»: agrega módulos compatibles, repartidos por todo el local, hasta que la suma de
     huellas (largo × fondo) alcance porcentaje × área útil, o se agote el presupuesto o los candidatos.
 
@@ -469,6 +475,7 @@ def seleccionar_modulos_cobertura(candidatos, conflictos, area_util_m2, porcenta
     primero el patrón perimetral y luego filas/islas. Se prefieren los candidatos con la espalda apoyada (contra un
     muro o espalda con espalda con otro rack ya elegido), así cada pasillo sirve a dos frentes y el área se aprovecha.
     Los conflictos (choques y pasillos tapados) se respetan igual que en seleccionar_modulos.
+    volumen_objetivo: si el stock necesita más volumen que el área pedida, se sigue agregando hasta cubrirlo.
     Devuelve la lista de índices elegidos (incluye `ya_elegidos`)."""
     if not len(candidatos):
         return list(ya_elegidos)
@@ -504,10 +511,11 @@ def seleccionar_modulos_cobertura(candidatos, conflictos, area_util_m2, porcenta
     huella = tabla["huella_m2"].to_numpy(dtype=float)
     objetivo = max(0.0, float(porcentaje)) * float(area_util_m2)
     elegidos = list(ya_elegidos)
-    cubierta, gasto = 0.0, 0.0
+    cubierta, gasto, volumen = 0.0, 0.0, 0.0
+    volumenes = tabla["volumen_util_m3"].to_numpy(dtype=float) if "volumen_util_m3" in tabla else np.zeros(len(tabla))
 
     def tomar(k):
-        nonlocal cubierta, gasto
+        nonlocal cubierta, gasto, volumen
         n = posicion_de.get(k)
         bloqueados = [posicion_de[v] for v in vecinos.get(k, ()) if v in posicion_de]
         libre[bloqueados] = False
@@ -516,6 +524,7 @@ def seleccionar_modulos_cobertura(candidatos, conflictos, area_util_m2, porcenta
         libre[n] = False
         cubierta += huella[n]
         gasto += costo[n]
+        volumen += volumenes[n]
         h = H[n]
         apoyada[(bx0 < h[2]) & (h[0] < bx1) & (by0 < h[3]) & (h[1] < by1)] = True
         en_fila[(sx0 < h[2]) & (h[0] < sx1) & (sy0 < h[3]) & (h[1] < sy1) & (orient == orient[n])] = True
@@ -525,7 +534,7 @@ def seleccionar_modulos_cobertura(candidatos, conflictos, area_util_m2, porcenta
             libre[posicion_de[k]] = False
     for k in elegidos:
         tomar(int(k))
-    while cubierta < objetivo:
+    while cubierta < objetivo or volumen < volumen_objetivo:
         disponibles = libre.copy()
         if presupuesto is not None:
             disponibles &= gasto + costo <= presupuesto + 1e-6
@@ -556,7 +565,6 @@ def lista_de_compra(estantes_instalados):
     vacios = tabla.assign(vacio=[bool(e.get("vacio")) for e in nuevos]).groupby(["tipo", "nombre"])["vacio"].sum()
     if vacios.any():
         compra["vacios_capacidad_disponible"] = [int(vacios.get((t, n), 0)) for t, n in zip(compra["tipo"], compra["nombre"])]
-        compra["nota"] = ROTULO_PRECIOS + "; incluye racks vacíos de la propuesta de capacidad máxima"
     return compra
 
 

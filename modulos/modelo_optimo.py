@@ -917,7 +917,7 @@ def optimizar_diseno(catalogo, resumen, local, parametros, incompatibilidades, p
     preferencias = preferencias_de(local)
     modo_diseno = preferencias["modo_diseno"]
     presupuesto = preferencias.get("presupuesto_max_soles")
-    cobertura = bool(preferencias.get("cobertura_total")) and modo_diseno != "B"
+    cobertura = bool(preferencias.get("cobertura_total", ajustes["diseno"].get("cobertura_por_defecto", True))) and modo_diseno != "B"
     porcentaje_cobertura = float(preferencias.get("cobertura_porcentaje") or ajustes["diseno"].get("cobertura_defecto", 0.4))
     avisos = []
     existentes = [dict(e, existente=True) for e in local.get("estantes", [])] if modo_diseno in ("B", "C") else []
@@ -937,7 +937,7 @@ def optimizar_diseno(catalogo, resumen, local, parametros, incompatibilidades, p
     if tipos:
         ajustes_candidatos = ajustes
         if cobertura:
-            # Para llenar el local hacen falta más candidatos (filas espalda con espalda en todo el local)
+            # Para cubrir el local hacen falta más candidatos (filas espalda con espalda en todo el local)
             ajustes_candidatos = copy.deepcopy(ajustes)
             ajustes_candidatos["diseno"]["limite_candidatos"] = max(
                 ajustes["diseno"]["limite_candidatos"], ajustes["diseno"].get("limite_candidatos_cobertura", 8000))
@@ -952,20 +952,22 @@ def optimizar_diseno(catalogo, resumen, local, parametros, incompatibilidades, p
             local, modo, {"avisos_diseno": avisos})
     productos = preparar_productos(catalogo, resumen, parametros, modo, ajustes)
     # Pool de módulos que entran al modelo: una selección holgada de la heurística y los mejores alternativos
+    # La ubicación de los racks NO depende de la distancia al despacho: se reparten por toda el área útil
+    # (seleccionar_modulos_cobertura). La distancia solo se usa después, para asignar productos a posiciones.
     pool, holgada = [], []
+    area_util_m2, huella_existente, fraccion_nueva = 0.0, 0.0, 0.0
+    volumen_stock = dr.demanda_volumen(productos, ajustes) * ajustes["diseno"]["margen_capacidad"]
     if len(candidatos):
-        holgado = dr.demanda_volumen(productos, ajustes) * ajustes["diseno"]["margen_capacidad"] * 3.0
-        holgada = dr.seleccionar_modulos(candidatos, conflictos, holgado, None, lam)
-        pool = list(holgada)
+        area_util_m2 = dr.area_util(local_base, parametros, ajustes)
+        huella_existente = sum((dr.huella_estante(e)[2] - dr.huella_estante(e)[0]) * (dr.huella_estante(e)[3] - dr.huella_estante(e)[1])
+                               for e in existentes)
         if cobertura:
-            # Modo «llenar todo el local»: el pool también cubre todo el local, no solo lo más cercano al despacho
-            area_util_m2 = dr.area_util(local_base, parametros, ajustes)
-            huella_existente = sum((dr.huella_estante(e)[2] - dr.huella_estante(e)[0]) * (dr.huella_estante(e)[3] - dr.huella_estante(e)[1])
-                                   for e in existentes)
             fraccion_nueva = max(0.0, porcentaje_cobertura - huella_existente / max(area_util_m2, 1e-6))
-            seleccion_cobertura = dr.seleccionar_modulos_cobertura(candidatos, conflictos, area_util_m2, fraccion_nueva, presupuesto)
-            if not rapido:
-                pool += [k for k in seleccion_cobertura if k not in pool]
+        # Selección holgada: el área pedida (con margen) o el triple del volumen del stock, lo que sea mayor
+        holgada = dr.seleccionar_modulos_cobertura(candidatos, conflictos, area_util_m2,
+                                                   min(0.95, fraccion_nueva + 0.15) if cobertura else 0.0, None,
+                                                   volumen_objetivo=volumen_stock * 3.0)
+        pool = list(holgada)
         if not rapido:
             limite = max(ajustes["diseno"]["modulos_en_modelo"], len(pool))
             for k in candidatos.index:  # ya están ordenados por calidad
@@ -1012,9 +1014,9 @@ def optimizar_diseno(catalogo, resumen, local, parametros, incompatibilidades, p
 
     # Heurística: elegir módulos y llenarlos; si falta espacio, agregar más
     avance(0.3, "Propuesta rápida: eligiendo módulos y ubicando productos con la heurística…")
-    objetivo_volumen = max(0.0, dr.demanda_volumen(productos, ajustes) * ajustes["diseno"]["margen_capacidad"] - volumen_existente)
-    elegidos = dr.seleccionar_modulos(candidatos, conflictos, objetivo_volumen, presupuesto, lam,
-                                      excluir=fuera_de_la_holgada) if len(candidatos) else []
+    objetivo_volumen = max(0.0, volumen_stock - volumen_existente)
+    elegidos = dr.seleccionar_modulos_cobertura(candidatos, conflictos, area_util_m2, fraccion_nueva, presupuesto,
+                                                excluir=fuera_de_la_holgada, volumen_objetivo=objetivo_volumen)         if len(candidatos) else []
     pares_primera = pares[pares["j"] < n_primera]  # la heurística solo usa los módulos de la selección holgada
     con_pares = set(pares_primera["i"])
     for _ in range(6):
@@ -1030,13 +1032,15 @@ def optimizar_diseno(catalogo, resumen, local, parametros, incompatibilidades, p
         # Lo que limita suele ser la fragmentación (niveles llenos), no el volumen: se crece desde lo ya elegido
         volumen_elegido = float(candidatos.loc[elegidos, "volumen_util_m3"].sum()) if elegidos else 0.0
         objetivo_volumen = max(objetivo_volumen, volumen_elegido) + max(volumen_faltante / ajustes["diseno"]["factor_llenado"], 0.5)
-        nuevos = dr.seleccionar_modulos(candidatos, conflictos, objetivo_volumen, presupuesto, lam, ya_elegidos=elegidos,
-                                        excluir=fuera_de_la_holgada)
+        nuevos = dr.seleccionar_modulos_cobertura(candidatos, conflictos, area_util_m2, fraccion_nueva, presupuesto,
+                                                  ya_elegidos=elegidos, excluir=fuera_de_la_holgada,
+                                                  volumen_objetivo=objetivo_volumen)
         if len(nuevos) == len(elegidos):
             break
         elegidos = nuevos
     usados = {modulo_de[j] for j in asignacion.values()}
-    elegidos = [k for k in elegidos if candidatos.at[k, "id"] in usados]  # un módulo vacío no se compra (salvo en cobertura)
+    if not cobertura:
+        elegidos = [k for k in elegidos if candidatos.at[k, "id"] in usados]  # sin cobertura, un módulo vacío no se compra
     heuristica_modulos = {candidatos.at[k, "id"] for k in elegidos}
     asignacion_heuristica = dict(asignacion)
     objetivo_h = valor_objetivo(asignacion, pares_primera)
@@ -1073,27 +1077,30 @@ def optimizar_diseno(catalogo, resumen, local, parametros, incompatibilidades, p
         usados = {modulo_de[j] for j in asignacion.values()}
         instalados = set(ids_existentes) | (set(solucion_modelo["modulos_instalados"] or set()) & usados)
     vacios = set()
-    info_cobertura = {"activa": False}
     if cobertura and len(candidatos):
         # Se conservan los módulos con productos y se completan, sin chocar con ellos, hasta cubrir el área pedida.
-        # Los agregados quedan vacíos («capacidad disponible») y el modelo no los vuelve a quitar.
+        # Los que no reciben productos quedan vacíos («capacidad disponible») y el modelo no los vuelve a quitar.
         indice_de = {m: k for k, m in zip(candidatos.index, candidatos["id"])}
         ya = [indice_de[m] for m in instalados if m in indice_de]
         completos = dr.seleccionar_modulos_cobertura(candidatos, conflictos, area_util_m2, fraccion_nueva, presupuesto,
                                                      ya_elegidos=ya)
-        vacios = {candidatos.at[k, "id"] for k in completos} - instalados
-        instalados |= vacios
+        instalados |= {candidatos.at[k, "id"] for k in completos}
+        usados_final = {modulo_de[j] for j in asignacion.values()}
+        vacios = {m for m in instalados if m in indice_de and m not in usados_final}
         estante_de.update({m: dict(estante_de[m], vacio=True) for m in vacios})
-        cubierta = sum((r.x1 - r.x0) * (r.y1 - r.y0) for r in candidatos.loc[completos].itertuples()) + huella_existente
-        info_cobertura = {"activa": True, "porcentaje": porcentaje_cobertura, "area_util_m2": round(area_util_m2, 2),
-                          "area_cubierta_m2": round(cubierta, 2), "modulos_vacios": len(vacios),
-                          "fraccion_lograda": round(cubierta / max(area_util_m2, 1e-6), 3)}
-        avisos.append(f"Propuesta de CAPACIDAD MÁXIMA (llenar todo el local), no del stock actual: racks sobre "
-                      f"{cubierta:,.1f} m² de {area_util_m2:,.1f} m² útiles ({info_cobertura['fraccion_lograda']:.0%}; pedido "
-                      f"{porcentaje_cobertura:.0%}); {len(vacios)} racks quedan vacíos como capacidad disponible.")
+    nuevos_instalados = [estante_de[m] for m in instalados if m not in ids_existentes]
+    cubierta = sum((dr.huella_estante(e)[2] - dr.huella_estante(e)[0]) * (dr.huella_estante(e)[3] - dr.huella_estante(e)[1])
+                   for e in nuevos_instalados) + huella_existente
+    info_cobertura = {"activa": bool(cobertura and len(candidatos)), "porcentaje": porcentaje_cobertura if cobertura else None,
+                      "area_util_m2": round(area_util_m2, 2), "area_cubierta_m2": round(cubierta, 2),
+                      "modulos_vacios": len(vacios), "fraccion_lograda": round(cubierta / max(area_util_m2, 1e-6), 3)}
+    if info_cobertura["activa"]:
+        avisos.append(f"Racks repartidos por toda el área útil: {cubierta:,.1f} m² de {area_util_m2:,.1f} m² útiles "
+                      f"({info_cobertura['fraccion_lograda']:.0%}; pedido {porcentaje_cobertura:.0%}). Propuesta de capacidad "
+                      f"del local, no solo del stock actual: {len(vacios)} racks quedan vacíos como capacidad disponible.")
         if info_cobertura["fraccion_lograda"] < porcentaje_cobertura - 0.05:
             avisos.append("No se alcanzó el área pedida: se agotaron el presupuesto o los lugares compatibles "
-                          "(pasillos mínimos, salidas y zonas prohibidas).")
+                          "(pasillos mínimos, salidas, despejes de ingreso y zonas prohibidas).")
 
     # Diseño final: distancias reales con los racks instalados
     avance(0.92, "Midiendo distancias reales con los racks instalados…")
